@@ -199,8 +199,27 @@ function EnableLyncUsers {
         # Gather the array of users
         $UserFilter = "(&(objectCategory=user)(objectClass=user)(!(msRTCSIP-PrimaryUserAddress=*))(mail=*)(memberOf=$($GroupDN)))"
         $UserArray = DirectorySearcher -LDAPQuery $UserFilter -SearchRootDN $Config.ADSettings.DNDomain -ADAttributes @("sAMAccountName","distinguishedName")
-        # We check if it's a paired Lync Pool config
-        if ($Config.LyncSettings.PairedPool -eq "True") {
+        # We check the last pool used configuration file, and if it doesn't exist we enumerate the pools
+        if (Test-Path ".\LastUsedPools.config" -PathType Leaf) {
+            $TargetPoolArray = Import-Clixml ".\LastUsedPools.config"
+        } else {
+            # Since the file doesn't exist, we recreate the object using the second pool names, as they'll be flipped over during activation
+            $TargetPoolArray = @()
+            $PoolIndex = 0
+            ForEach ($LyncPool in $Config.LyncSettings.PoolArray.Pool) {
+                $TargetPoolObj = New-Object System.Object
+                $TargetPoolObj | Add-Member -type NoteProperty -Name PoolID -Value $PoolIndex
+                # If the pool location doesn't have a paired pool, we'll just use the first value
+                If ($LyncPool.SecondPoolFQDN -ne "") {
+                    $TargetPoolObj | Add-Member -type NoteProperty -Name LastUsedPool -Value 1
+                } else {
+                    $TargetPoolObj | Add-Member -type NoteProperty -Name LastUsedPool -Value 0
+                }
+                $TargetPoolArray += $TargetPoolObj
+                $PoolIndex++
+            }
+        }
+        if ($Config.LyncSettings.PoolTopology -eq "Simple") {
             # We check if Lastpoolused.cfg exists, otherwise we assign the second pool to the variable, as it'll be flipped over
             if (Test-Path ".\LastUsedPool.cfg" -PathType Leaf) {
                 $TargetPool = get-content ".\LastUsedPool.cfg"
