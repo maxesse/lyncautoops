@@ -270,7 +270,7 @@ function SuspendLyncUsers {
         # Filter to find users in who are disabled in AD, but enabled on Lync on either of the two pools
         # Gather the array of users
         $UserFilter = "(&(objectCategory=user)(objectClass=user)(userAccountControl:1.2.840.113556.1.4.803:=2)(msRTCSIP-UserEnabled=TRUE)(msRTCSIP-PrimaryUserAddress=sip:*))"
-        $UserArray = DirectorySearcher -LDAPQuery $UserFilter -SearchRootDN $Config.ADSettings.DNDomain
+        $UserArray = DirectorySearcher -LDAPQuery $UserFilter -SearchRootDN $Config.ADSettings.DNDomain -ADAttributes @("sAMAccountName")
 
         foreach ($objResult in $UserArray) {
             $objUser = $objResult.Properties
@@ -317,7 +317,7 @@ function ReactivateLyncUsers {
         # Filter to find users in who are enabled in AD, but disabled on Lync on either of the two pools
         # Gather the array of users
         $UserFilter = "(&(objectCategory=user)(objectClass=user)(!userAccountControl:1.2.840.113556.1.4.803:=2)(msRTCSIP-UserEnabled=FALSE)(msRTCSIP-PrimaryUserAddress=sip:*))"
-        $UserArray = DirectorySearcher -LDAPQuery $UserFilter -SearchRootDN $Config.ADSettings.DNDomain
+        $UserArray = DirectorySearcher -LDAPQuery $UserFilter -SearchRootDN $Config.ADSettings.DNDomain -ADAttributes @("sAMAccountName")
 
         foreach ($objResult in $UserArray) {
             $objUser = $objResult.Properties
@@ -365,7 +365,7 @@ function DeleteLyncUsers {
         # Filter to find users in who have been disabled in AD for more than the DeleteThreshold parameter
         $oldDate = (Get-Date).AddDays("-" + $Config.ScriptFunctions.DeleteThreshold).ToFileTime().toString()
         $UserFilter = "(&(objectCategory=user)(objectClass=user)(lastLogonTimeStamp<=$oldDate)(userAccountControl:1.2.840.113556.1.4.803:=2)(msRTCSIP-PrimaryUserAddress=sip:*))"
-        $UserArray = DirectorySearcher -LDAPQuery $UserFilter -SearchRootDN $Config.ADSettings.DNDomain
+        $UserArray = DirectorySearcher -LDAPQuery $UserFilter -SearchRootDN $Config.ADSettings.DNDomain -ADAttributes @("sAMAccountName")
 
         foreach ($objResult in $UserArray) {
             $objUser = $objResult.Properties
