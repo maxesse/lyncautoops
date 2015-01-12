@@ -254,6 +254,8 @@ function EnableLyncUsers {
                         Continue
                     }
                 }
+                
+                # Here we flip over the pool according to the last used one, or keep on using the first if there isn't a pairget-csuser
                 if($TargetPoolArray[$TargetLocation.PoolID] -eq 0 -and $Config.LyncSettings.PoolArray.Pool[$TargetLocation.PoolID].SecondPoolFQDN -ne "") {
                     $TargetPool = $TargetLocation.SecondPoolFQDN
                     $TargetPoolArray[$TargetLocation.PoolID] = 1
@@ -317,7 +319,7 @@ function SuspendLyncUsers {
             $error.clear()
             $objLyncUser = Get-CsUser -Identity $objItem
             # We compare whether the user(s) we found belong to the one/two pools specified in the config, to avoid changing users on pools we don't manage, as it often happens in a large deployment
-            If (($objLyncUser.RegistrarPool.FriendlyName -eq $Config.LyncSettings.FirstLyncPool) -or ($objLyncUser.RegistrarPool.FriendlyName -eq $Config.LyncSettings.SecondLyncPool)) {
+            If (($Config.LyncSettings.PoolArray.Pool.FirstPoolFQDN -contains $objLyncUser.RegistrarPool.FriendlyName) -or ($Config.LyncSettings.PoolArray.Pool.SecondPoolFQDN -contains $objLyncUser.RegistrarPool.FriendlyName)) {
                 # We suspend the user for Lync
                 Set-CsUser -Identity:$objItem -Enabled $False
                 if($error.count -gt 0) {
@@ -364,7 +366,7 @@ function ReactivateLyncUsers {
             $error.clear()
             $objLyncUser = Get-CsUser -Identity $objItem
             # We compare whether the user(s) we found belong to the one/two pools specified in the config, to avoid changing users on pools we don't manage, as it often happens in a large deployment
-            If (($objLyncUser.RegistrarPool.FriendlyName -eq $Config.LyncSettings.FirstLyncPool) -or ($objLyncUser.RegistrarPool.FriendlyName -eq $Config.LyncSettings.SecondLyncPool)) {
+            If (($Config.LyncSettings.PoolArray.Pool.FirstPoolFQDN -contains $objLyncUser.RegistrarPool.FriendlyName) -or ($Config.LyncSettings.PoolArray.Pool.SecondPoolFQDN -contains $objLyncUser.RegistrarPool.FriendlyName)) {
                 # This line reactivates the user
                 Set-CsUser -Identity:$objItem -Enabled $True
                 if($error.count -gt 0) {
@@ -412,7 +414,7 @@ function DeleteLyncUsers {
             $error.clear()
             $objLyncUser = Get-CsUser -Identity $objItem
             # We compare whether the user(s) we found belong to the one/two pools specified in the config, to avoid changing users on pools we don't manage, as it often happens in a large deployment
-            If (($objLyncUser.RegistrarPool.FriendlyName -eq $Config.LyncSettings.FirstLyncPool) -or ($objLyncUser.RegistrarPool.FriendlyName -eq $Config.LyncSettings.SecondLyncPool)) {
+            If (($Config.LyncSettings.PoolArray.Pool.FirstPoolFQDN -contains $objLyncUser.RegistrarPool.FriendlyName) -or ($Config.LyncSettings.PoolArray.Pool.SecondPoolFQDN -contains $objLyncUser.RegistrarPool.FriendlyName)) {
                 # This line deletes the user
                 Disable-CsUser -Identity:$objItem
                 if($error.count -gt 0) {
