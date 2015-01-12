@@ -21,3 +21,4 @@ $RECYCLE.BIN/
 # LyncAutoOps log files
 *.log
 LastUsedPools.config
+LyncAutoOpsDev.config
