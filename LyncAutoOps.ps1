@@ -100,7 +100,10 @@ function DirectorySearcher {
         [string]$LDAPQuery,
         
         [parameter(Mandatory=$true,ValueFromPipeline=$false)]
-        [string]$SearchRootDN
+        [string]$SearchRootDN,
+
+        [parameter(Mandatory=$true,ValueFromPipeline=$false)]
+        [array]$ADAttributes
     )
     PROCESS {
         try {
@@ -111,8 +114,7 @@ function DirectorySearcher {
             $DSSearcher.Filter = $LDAPQuery
             $DSSearcher.SearchScope = "Subtree"
 
-            $DSPropList = "sAMAccountName","distinguishedName"
-            foreach ($i in $DSPropList){$DSSearcher.PropertiesToLoad.Add($i) | Out-Null}
+            foreach ($i in $ADAttributes){$DSSearcher.PropertiesToLoad.Add($i) | Out-Null}
 
             $DSResults = $DSSearcher.FindAll()
         }
@@ -196,7 +198,7 @@ function EnableLyncUsers {
         # Filter to find users in AD who are members of the new Lync users group, without SIP address and with an email configured
         # Gather the array of users
         $UserFilter = "(&(objectCategory=user)(objectClass=user)(!(msRTCSIP-PrimaryUserAddress=*))(mail=*)(memberOf=$($GroupDN)))"
-        $UserArray = DirectorySearcher -LDAPQuery $UserFilter -SearchRootDN $Config.ADSettings.DNDomain
+        $UserArray = DirectorySearcher -LDAPQuery $UserFilter -SearchRootDN $Config.ADSettings.DNDomain -ADAttributes @("sAMAccountName","distinguishedName")
         # We check if it's a paired Lync Pool config
         if ($Config.LyncSettings.PairedPool -eq "True") {
             # We check if Lastpoolused.cfg exists, otherwise we assign the second pool to the variable, as it'll be flipped over
@@ -489,7 +491,7 @@ function EmailNotifier {
 # If the configuration file was set to enable Lync users, the following block will be executed
 if ($Config.ScriptFunctions.Enablement -eq "True") {
     # Here we convert the SAMAccountName of the new lync users AD group into a distinguished name
-    $GroupSearcher = DirectorySearcher -SearchRootDN $Config.ADSettings.DNDomain -LDAPQuery "(&(objectCategory=group)(sAMAccountName=$($Config.ADSettings.NewLyncGroup)))"
+    $GroupSearcher = DirectorySearcher -SearchRootDN $Config.ADSettings.DNDomain -LDAPQuery "(&(objectCategory=group)(sAMAccountName=$($Config.ADSettings.NewLyncGroup)))" -ADAttributes @("distinguishedName")
     $GroupDN = ($GroupSearcher.Properties.distinguishedname[0]).ToString()
 
     # We enable the lync users and store the array temporarily
