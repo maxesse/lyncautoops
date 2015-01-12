@@ -1,6 +1,6 @@
 ################################################################################################################################
 # Name: LyncAutoOps Tool 
-# Version: v1.1.0 (5/1/2015)
+# Version: v1.5.0 (12/1/2015)
 # Created By: Max Sanna
 # Web Site: http://blog.maxsanna.com
 # Contact: max(at)maxsanna.com
@@ -28,6 +28,8 @@
 # 1.0.0 Initial Release.
 # 1.1.0 Replaced having to use the New Lync Group DN with its SAM Account name for simplicity.
 #       Added comments to the code.
+# 1.5.0 Added multi-pool support for global deployments based on user's location, and fallback mechanism
+#       Various code improvements.
 # 		
 ################################################################################################################################
 
