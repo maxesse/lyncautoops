@@ -454,38 +454,41 @@ function GrantLyncPolicies {
             $objUser = $objResult.Properties
             [string]$objItem = $Config.ADSettings.NetBiosDomain + "\" + $objUser."samaccountname"
             $error.clear()
-            # The following IF statements check whether the policy was set to something in the config. If left empty, the global policy will be left assigned.
-            if ($Config.UserPolicies.ExchangeArchiving -eq "True") {
-                Set-CsUser -Identity $objitem -ExchangeArchivingPolicy ArchivingToExchange
-            }
+            # We only assign policies to successfully activated users
+            If (Get-CsUser -Identity $objItem -ErrorAction SilentlyContinue) {
+                # The following IF statements check whether the policy was set to something in the config. If left empty, the global policy will be left assigned.
+                if ($Config.UserPolicies.ExchangeArchiving -eq "True") {
+                    Set-CsUser -Identity $objitem -ExchangeArchivingPolicy ArchivingToExchange
+                }
 
-            if ($Config.UserPolicies.ClientPolicy -ne "") {
-                Grant-CsClientPolicy -Identity $objitem -PolicyName $Config.UserPolicies.ClientPolicy
-            }
+                if ($Config.UserPolicies.ClientPolicy -ne "") {
+                    Grant-CsClientPolicy -Identity $objitem -PolicyName $Config.UserPolicies.ClientPolicy
+                }
 
-            if ($Config.UserPolicies.ConferencingPolicy -ne "") {
-                Grant-CsConferencingPolicy -Identity $objitem -PolicyName $Config.UserPolicies.ConferencingPolicy
-            }
+                if ($Config.UserPolicies.ConferencingPolicy -ne "") {
+                    Grant-CsConferencingPolicy -Identity $objitem -PolicyName $Config.UserPolicies.ConferencingPolicy
+                }
 
-            if ($Config.UserPolicies.ExternalPolicy -ne "") {
-                Grant-CsExternalAccessPolicy -Identity $objitem -PolicyName $Config.UserPolicies.ExternalPolicy
-            }
+                if ($Config.UserPolicies.ExternalPolicy -ne "") {
+                    Grant-CsExternalAccessPolicy -Identity $objitem -PolicyName $Config.UserPolicies.ExternalPolicy
+                }
             
-            if ($Config.UserPolicies.PinPolicy -ne "") {
-                Grant-CsPinPolicy -Identity $objitem -PolicyName $Config.UserPolicies.PinPolicy
-            }
+                if ($Config.UserPolicies.PinPolicy -ne "") {
+                    Grant-CsPinPolicy -Identity $objitem -PolicyName $Config.UserPolicies.PinPolicy
+                }
             
-            if ($Config.UserPolicies.ArchivingPolicy -ne "") {
-                Grant-CsArchivingPolicy -Identity $objitem -PolicyName $Config.UserPolicies.ArchivingPolicy
-            }
+                if ($Config.UserPolicies.ArchivingPolicy -ne "") {
+                    Grant-CsArchivingPolicy -Identity $objitem -PolicyName $Config.UserPolicies.ArchivingPolicy
+                }
 
-            if($error.count -gt 0)
-            {
-                  logger ( "ERROR SETTING POLICIES FOR THE LYNC USER: " + $objItem + " : " + $error ) cERROR
-            }
-            else
-            {
-                  logger ("LYNC USER POLICIES SET SUCCESSFULLY : " + $objItem ) CINFO
+                if($error.count -gt 0)
+                {
+                      logger ( "ERROR SETTING POLICIES FOR THE LYNC USER: " + $objItem + " : " + $error ) cERROR
+                }
+                else
+                {
+                      logger ("LYNC USER POLICIES SET SUCCESSFULLY : " + $objItem ) CINFO
+                }
             }
 
         }        
