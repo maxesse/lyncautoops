@@ -198,7 +198,14 @@ function EnableLyncUsers {
         # Filter to find users in AD who are members of the new Lync users group, without SIP address and with an email configured
         # Gather the array of users
         $UserFilter = "(&(objectCategory=user)(objectClass=user)(!(msRTCSIP-PrimaryUserAddress=*))(mail=*)(memberOf=$($GroupDN)))"
-        $UserArray = DirectorySearcher -LDAPQuery $UserFilter -SearchRootDN $Config.ADSettings.DNDomain -ADAttributes @("sAMAccountName","distinguishedName")
+        
+        # We load the array of users, but if we're in a multipool topology we also load their location
+        if ($Config.LyncSettings.PoolTopology -eq "Simple") {
+            $UserArray = DirectorySearcher -LDAPQuery $UserFilter -SearchRootDN $Config.ADSettings.DNDomain -ADAttributes @("sAMAccountName","distinguishedName")
+        } elseif ($Config.LyncSettings.PoolTopology -eq "MultiPool") {
+            $UserArray = DirectorySearcher -LDAPQuery $UserFilter -SearchRootDN $Config.ADSettings.DNDomain -ADAttributes @("sAMAccountName","distinguishedName",$Config.ADSettings.UserLocation)
+        }
+        
         # We check the last pool used configuration file, and if it doesn't exist we enumerate the pools
         if (Test-Path ".\LastUsedPools.config" -PathType Leaf) {
             $TargetPoolArray = Import-Clixml ".\LastUsedPools.config"
@@ -230,7 +237,11 @@ function EnableLyncUsers {
                     $TargetPool = $Config.LyncSettings.PoolArray.Pool[0].FirstPoolFQDN
                     $TargetPoolArray[0] = 0
                 }
-            }                
+            } elseif ($Config.LyncSettings.PoolTopology -eq "MultiPool") {
+                # Lowercase version of the user location property as it's case sensitive
+                $UserLocation = $Config.ADSettings.UserLocation.ToLower()
+                
+            }           
             # We finally enable the Lync user here
             Enable-CsUser -Identity $objItem -RegistrarPool $TargetPool -SipAddressType EmailAddress -Confirm:$False
             if($error.count -gt 0) {
@@ -497,6 +508,12 @@ function EmailNotifier {
 
 # If the configuration file was set to enable Lync users, the following block will be executed
 if ($Config.ScriptFunctions.Enablement -eq "True") {
+    
+    # We add an ID to the pools to simplify match with last used pool during enablement
+    For ($i=0; $i -lt $Config.LyncSettings.PoolArray.Pool.Length; $i++) {
+        $Config.LyncSettings.PoolArray.Pool[$i] | Add-Member -MemberType NoteProperty -Name PoolID -Value $i
+    }
+
     # Here we convert the SAMAccountName of the new lync users AD group into a distinguished name
     $GroupSearcher = DirectorySearcher -SearchRootDN $Config.ADSettings.DNDomain -LDAPQuery "(&(objectCategory=group)(sAMAccountName=$($Config.ADSettings.NewLyncGroup)))" -ADAttributes @("distinguishedName")
     $GroupDN = ($GroupSearcher.Properties.distinguishedname[0]).ToString()
