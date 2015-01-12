@@ -1,6 +1,6 @@
 ################################################################################################################################
 # Name: LyncAutoOps Tool 
-# Version: v1.1.0 (5/1/2015)
+# Version: v1.5.0 (12/1/2015)
 # Created By: Max Sanna
 # Web Site: http://blog.maxsanna.com
 # Contact: max(at)maxsanna.com
@@ -28,6 +28,8 @@
 # 1.0.0 Initial Release.
 # 1.1.0 Replaced having to use the New Lync Group DN with its SAM Account name for simplicity.
 #       Added comments to the code.
+# 1.5.0 Added multi-pool support for global deployments based on user's location, and fallback mechanism
+#       Various code improvements.
 # 		
 ################################################################################################################################
 
@@ -100,7 +102,10 @@ function DirectorySearcher {
         [string]$LDAPQuery,
         
         [parameter(Mandatory=$true,ValueFromPipeline=$false)]
-        [string]$SearchRootDN
+        [string]$SearchRootDN,
+
+        [parameter(Mandatory=$true,ValueFromPipeline=$false)]
+        [array]$ADAttributes
     )
     PROCESS {
         try {
@@ -111,8 +116,7 @@ function DirectorySearcher {
             $DSSearcher.Filter = $LDAPQuery
             $DSSearcher.SearchScope = "Subtree"
 
-            $DSPropList = "sAMAccountName","distinguishedName"
-            foreach ($i in $DSPropList){$DSSearcher.PropertiesToLoad.Add($i) | Out-Null}
+            foreach ($i in $ADAttributes){$DSSearcher.PropertiesToLoad.Add($i) | Out-Null}
 
             $DSResults = $DSSearcher.FindAll()
         }
@@ -196,17 +200,28 @@ function EnableLyncUsers {
         # Filter to find users in AD who are members of the new Lync users group, without SIP address and with an email configured
         # Gather the array of users
         $UserFilter = "(&(objectCategory=user)(objectClass=user)(!(msRTCSIP-PrimaryUserAddress=*))(mail=*)(memberOf=$($GroupDN)))"
-        $UserArray = DirectorySearcher -LDAPQuery $UserFilter -SearchRootDN $Config.ADSettings.DNDomain
-        # We check if it's a paired Lync Pool config
-        if ($Config.LyncSettings.PairedPool -eq "True") {
-            # We check if Lastpoolused.cfg exists, otherwise we assign the second pool to the variable, as it'll be flipped over
-            if (Test-Path ".\LastUsedPool.cfg" -PathType Leaf) {
-                $TargetPool = get-content ".\LastUsedPool.cfg"
-            } else {
-                $TargetPool = $Config.LyncSettings.SecondLyncPool
-            }
+        
+        # We load the array of users, but if we're in a multipool topology we also load their location
+        if ($Config.LyncSettings.PoolTopology -eq "Simple") {
+            $UserArray = DirectorySearcher -LDAPQuery $UserFilter -SearchRootDN $Config.ADSettings.DNDomain -ADAttributes @("sAMAccountName","distinguishedName")
+        } elseif ($Config.LyncSettings.PoolTopology -eq "MultiPool") {
+            $UserArray = DirectorySearcher -LDAPQuery $UserFilter -SearchRootDN $Config.ADSettings.DNDomain -ADAttributes @("sAMAccountName","distinguishedName",$Config.ADSettings.UserLocation)
+        }
+        
+        # We check the last pool used configuration file, and if it doesn't exist we enumerate the pools
+        if (Test-Path ".\LastUsedPools.config" -PathType Leaf) {
+            $TargetPoolArray = Import-Clixml ".\LastUsedPools.config"
         } else {
-            $TargetPool = $Config.LyncSettings.FirstLyncPool
+            # Since the file doesn't exist, we recreate the object using the second pool names, as they'll be flipped over during activation
+            $TargetPoolArray = @()
+            ForEach ($LyncPool in $Config.LyncSettings.PoolArray.Pool) {
+                # If the pool location doesn't have a paired pool, we'll just use the first value
+                If ($LyncPool.SecondPoolFQDN -ne "") {
+                    $TargetPoolArray += 1
+                } else {
+                    $TargetPoolArray += 0
+                }
+            }
         }
 
         foreach ($objResult in $UserArray) {
@@ -214,14 +229,44 @@ function EnableLyncUsers {
             [string]$objItem = $Config.ADSettings.NetBiosDomain + "\" + $objUser."samaccountname"
             [string]$objDN = $objuser."distinguishedname"
             $error.clear()
-            # If we're in a paired pool configuration we flip over the target pool
-            if($Config.LyncSettings.Pairedpool -eq "True") {
-                if($TargetPool -eq $Config.LyncSettings.FirstLyncPool) {
-                    $TargetPool = $Config.LyncSettings.SecondLyncPool
+
+            # We work out on which pool to enable the new user
+            if ($Config.LyncSettings.PoolTopology -eq "Simple") {
+                if($TargetPoolArray[0] -eq 0 -and $Config.LyncSettings.PoolArray.Pool[0].SecondPoolFQDN -ne "") {
+                    $TargetPool = $Config.LyncSettings.PoolArray.Pool[0].SecondPoolFQDN
+                    $TargetPoolArray[0] = 1
                 } else {
-                    $TargetPool = $Config.LyncSettings.FirstLyncPool
+                    $TargetPool = $Config.LyncSettings.PoolArray.Pool[0].FirstPoolFQDN
+                    $TargetPoolArray[0] = 0
                 }
-            }
+            } elseif ($Config.LyncSettings.PoolTopology -eq "MultiPool") {
+                # Lowercase version of the user location property as it's case sensitive
+                $UserLocationAttribute = $Config.ADSettings.UserLocation.ToLower()
+                
+                # We check user location against pool location
+                $TargetLocation = $Config.LyncSettings.PoolArray.Pool | Where-Object {$_.Location -eq $ObjUser.$UserLocationAttribute}
+                
+                # If the user has a different location or it's not specified we'll try with the fallback pool
+                If ($ObjUser.$UserLocationAttribute -eq $Null -or $TargetLocation -eq $Null) {
+                    $TargetLocation = $Config.LyncSettings.PoolArray.Pool | Where-Object {$_.IsFallBackPool -eq "True"}
+                    
+                    # If a fallback pool is not configured either, we'll skip the user
+                    If ($TargetLocation -eq $Null) {
+                        logger ( "CANNOT ENABLE LYNC USER - LOCATION NOT SUPPORTED AND FALLBACK POOL DISABLED: " + $objItem + " : " + $error ) cERROR
+                        Continue
+                    }
+                }
+                
+                # Here we flip over the pool according to the last used one, or keep on using the first if there isn't a pairget-csuser
+                if($TargetPoolArray[$TargetLocation.PoolID] -eq 0 -and $Config.LyncSettings.PoolArray.Pool[$TargetLocation.PoolID].SecondPoolFQDN -ne "") {
+                    $TargetPool = $TargetLocation.SecondPoolFQDN
+                    $TargetPoolArray[$TargetLocation.PoolID] = 1
+                } else {
+                    $TargetPool = $TargetLocation.FirstPoolFQDN
+                    $TargetPoolArray[$TargetLocation.PoolID] = 0
+                }
+                
+            }           
             # We finally enable the Lync user here
             Enable-CsUser -Identity $objItem -RegistrarPool $TargetPool -SipAddressType EmailAddress -Confirm:$False
             if($error.count -gt 0) {
@@ -238,7 +283,7 @@ function EnableLyncUsers {
             }
          }
          # We commit to file the last used pool for the next run
-         $TargetPool | Out-file ".\LastUsedPool.cfg"
+         $TargetPoolArray | Export-Clixml ".\LastUsedPools.config"
          Return $UserArray
     }
 }
@@ -268,7 +313,7 @@ function SuspendLyncUsers {
         # Filter to find users in who are disabled in AD, but enabled on Lync on either of the two pools
         # Gather the array of users
         $UserFilter = "(&(objectCategory=user)(objectClass=user)(userAccountControl:1.2.840.113556.1.4.803:=2)(msRTCSIP-UserEnabled=TRUE)(msRTCSIP-PrimaryUserAddress=sip:*))"
-        $UserArray = DirectorySearcher -LDAPQuery $UserFilter -SearchRootDN $Config.ADSettings.DNDomain
+        $UserArray = DirectorySearcher -LDAPQuery $UserFilter -SearchRootDN $Config.ADSettings.DNDomain -ADAttributes @("sAMAccountName")
 
         foreach ($objResult in $UserArray) {
             $objUser = $objResult.Properties
@@ -276,7 +321,7 @@ function SuspendLyncUsers {
             $error.clear()
             $objLyncUser = Get-CsUser -Identity $objItem
             # We compare whether the user(s) we found belong to the one/two pools specified in the config, to avoid changing users on pools we don't manage, as it often happens in a large deployment
-            If (($objLyncUser.RegistrarPool.FriendlyName -eq $Config.LyncSettings.FirstLyncPool) -or ($objLyncUser.RegistrarPool.FriendlyName -eq $Config.LyncSettings.SecondLyncPool)) {
+            If (($Config.LyncSettings.PoolArray.Pool.FirstPoolFQDN -contains $objLyncUser.RegistrarPool.FriendlyName) -or ($Config.LyncSettings.PoolArray.Pool.SecondPoolFQDN -contains $objLyncUser.RegistrarPool.FriendlyName)) {
                 # We suspend the user for Lync
                 Set-CsUser -Identity:$objItem -Enabled $False
                 if($error.count -gt 0) {
@@ -315,7 +360,7 @@ function ReactivateLyncUsers {
         # Filter to find users in who are enabled in AD, but disabled on Lync on either of the two pools
         # Gather the array of users
         $UserFilter = "(&(objectCategory=user)(objectClass=user)(!userAccountControl:1.2.840.113556.1.4.803:=2)(msRTCSIP-UserEnabled=FALSE)(msRTCSIP-PrimaryUserAddress=sip:*))"
-        $UserArray = DirectorySearcher -LDAPQuery $UserFilter -SearchRootDN $Config.ADSettings.DNDomain
+        $UserArray = DirectorySearcher -LDAPQuery $UserFilter -SearchRootDN $Config.ADSettings.DNDomain -ADAttributes @("sAMAccountName")
 
         foreach ($objResult in $UserArray) {
             $objUser = $objResult.Properties
@@ -323,7 +368,7 @@ function ReactivateLyncUsers {
             $error.clear()
             $objLyncUser = Get-CsUser -Identity $objItem
             # We compare whether the user(s) we found belong to the one/two pools specified in the config, to avoid changing users on pools we don't manage, as it often happens in a large deployment
-            If (($objLyncUser.RegistrarPool.FriendlyName -eq $Config.LyncSettings.FirstLyncPool) -or ($objLyncUser.RegistrarPool.FriendlyName -eq $Config.LyncSettings.SecondLyncPool)) {
+            If (($Config.LyncSettings.PoolArray.Pool.FirstPoolFQDN -contains $objLyncUser.RegistrarPool.FriendlyName) -or ($Config.LyncSettings.PoolArray.Pool.SecondPoolFQDN -contains $objLyncUser.RegistrarPool.FriendlyName)) {
                 # This line reactivates the user
                 Set-CsUser -Identity:$objItem -Enabled $True
                 if($error.count -gt 0) {
@@ -363,7 +408,7 @@ function DeleteLyncUsers {
         # Filter to find users in who have been disabled in AD for more than the DeleteThreshold parameter
         $oldDate = (Get-Date).AddDays("-" + $Config.ScriptFunctions.DeleteThreshold).ToFileTime().toString()
         $UserFilter = "(&(objectCategory=user)(objectClass=user)(lastLogonTimeStamp<=$oldDate)(userAccountControl:1.2.840.113556.1.4.803:=2)(msRTCSIP-PrimaryUserAddress=sip:*))"
-        $UserArray = DirectorySearcher -LDAPQuery $UserFilter -SearchRootDN $Config.ADSettings.DNDomain
+        $UserArray = DirectorySearcher -LDAPQuery $UserFilter -SearchRootDN $Config.ADSettings.DNDomain -ADAttributes @("sAMAccountName")
 
         foreach ($objResult in $UserArray) {
             $objUser = $objResult.Properties
@@ -371,7 +416,7 @@ function DeleteLyncUsers {
             $error.clear()
             $objLyncUser = Get-CsUser -Identity $objItem
             # We compare whether the user(s) we found belong to the one/two pools specified in the config, to avoid changing users on pools we don't manage, as it often happens in a large deployment
-            If (($objLyncUser.RegistrarPool.FriendlyName -eq $Config.LyncSettings.FirstLyncPool) -or ($objLyncUser.RegistrarPool.FriendlyName -eq $Config.LyncSettings.SecondLyncPool)) {
+            If (($Config.LyncSettings.PoolArray.Pool.FirstPoolFQDN -contains $objLyncUser.RegistrarPool.FriendlyName) -or ($Config.LyncSettings.PoolArray.Pool.SecondPoolFQDN -contains $objLyncUser.RegistrarPool.FriendlyName)) {
                 # This line deletes the user
                 Disable-CsUser -Identity:$objItem
                 if($error.count -gt 0) {
@@ -413,38 +458,41 @@ function GrantLyncPolicies {
             $objUser = $objResult.Properties
             [string]$objItem = $Config.ADSettings.NetBiosDomain + "\" + $objUser."samaccountname"
             $error.clear()
-            # The following IF statements check whether the policy was set to something in the config. If left empty, the global policy will be left assigned.
-            if ($Config.UserPolicies.ExchangeArchiving -eq "True") {
-                Set-CsUser -Identity $objitem -ExchangeArchivingPolicy ArchivingToExchange
-            }
+            # We only assign policies to successfully activated users
+            If (Get-CsUser -Identity $objItem -ErrorAction SilentlyContinue) {
+                # The following IF statements check whether the policy was set to something in the config. If left empty, the global policy will be left assigned.
+                if ($Config.UserPolicies.ExchangeArchiving -eq "True") {
+                    Set-CsUser -Identity $objitem -ExchangeArchivingPolicy ArchivingToExchange
+                }
 
-            if ($Config.UserPolicies.ClientPolicy -ne "") {
-                Grant-CsClientPolicy -Identity $objitem -PolicyName $Config.UserPolicies.ClientPolicy
-            }
+                if ($Config.UserPolicies.ClientPolicy -ne "") {
+                    Grant-CsClientPolicy -Identity $objitem -PolicyName $Config.UserPolicies.ClientPolicy
+                }
 
-            if ($Config.UserPolicies.ConferencingPolicy -ne "") {
-                Grant-CsConferencingPolicy -Identity $objitem -PolicyName $Config.UserPolicies.ConferencingPolicy
-            }
+                if ($Config.UserPolicies.ConferencingPolicy -ne "") {
+                    Grant-CsConferencingPolicy -Identity $objitem -PolicyName $Config.UserPolicies.ConferencingPolicy
+                }
 
-            if ($Config.UserPolicies.ExternalPolicy -ne "") {
-                Grant-CsExternalAccessPolicy -Identity $objitem -PolicyName $Config.UserPolicies.ExternalPolicy
-            }
+                if ($Config.UserPolicies.ExternalPolicy -ne "") {
+                    Grant-CsExternalAccessPolicy -Identity $objitem -PolicyName $Config.UserPolicies.ExternalPolicy
+                }
             
-            if ($Config.UserPolicies.PinPolicy -ne "") {
-                Grant-CsPinPolicy -Identity $objitem -PolicyName $Config.UserPolicies.PinPolicy
-            }
+                if ($Config.UserPolicies.PinPolicy -ne "") {
+                    Grant-CsPinPolicy -Identity $objitem -PolicyName $Config.UserPolicies.PinPolicy
+                }
             
-            if ($Config.UserPolicies.ArchivingPolicy -ne "") {
-                Grant-CsArchivingPolicy -Identity $objitem -PolicyName $Config.UserPolicies.ArchivingPolicy
-            }
+                if ($Config.UserPolicies.ArchivingPolicy -ne "") {
+                    Grant-CsArchivingPolicy -Identity $objitem -PolicyName $Config.UserPolicies.ArchivingPolicy
+                }
 
-            if($error.count -gt 0)
-            {
-                  logger ( "ERROR SETTING POLICIES FOR THE LYNC USER: " + $objItem + " : " + $error ) cERROR
-            }
-            else
-            {
-                  logger ("LYNC USER POLICIES SET SUCCESSFULLY : " + $objItem ) CINFO
+                if($error.count -gt 0)
+                {
+                      logger ( "ERROR SETTING POLICIES FOR THE LYNC USER: " + $objItem + " : " + $error ) cERROR
+                }
+                else
+                {
+                      logger ("LYNC USER POLICIES SET SUCCESSFULLY : " + $objItem ) CINFO
+                }
             }
 
         }        
@@ -488,8 +536,14 @@ function EmailNotifier {
 
 # If the configuration file was set to enable Lync users, the following block will be executed
 if ($Config.ScriptFunctions.Enablement -eq "True") {
+    
+    # We add an ID to the pools to simplify match with last used pool during enablement
+    For ($i=0; $i -lt $Config.LyncSettings.PoolArray.Pool.Length; $i++) {
+        $Config.LyncSettings.PoolArray.Pool[$i] | Add-Member -MemberType NoteProperty -Name PoolID -Value $i
+    }
+
     # Here we convert the SAMAccountName of the new lync users AD group into a distinguished name
-    $GroupSearcher = DirectorySearcher -SearchRootDN $Config.ADSettings.DNDomain -LDAPQuery "(&(objectCategory=group)(sAMAccountName=$($Config.ADSettings.NewLyncGroup)))"
+    $GroupSearcher = DirectorySearcher -SearchRootDN $Config.ADSettings.DNDomain -LDAPQuery "(&(objectCategory=group)(sAMAccountName=$($Config.ADSettings.NewLyncGroup)))" -ADAttributes @("distinguishedName")
     $GroupDN = ($GroupSearcher.Properties.distinguishedname[0]).ToString()
 
     # We enable the lync users and store the array temporarily
