@@ -219,16 +219,6 @@ function EnableLyncUsers {
                 $PoolIndex++
             }
         }
-        if ($Config.LyncSettings.PoolTopology -eq "Simple") {
-            # We check if Lastpoolused.cfg exists, otherwise we assign the second pool to the variable, as it'll be flipped over
-            if (Test-Path ".\LastUsedPool.cfg" -PathType Leaf) {
-                $TargetPool = get-content ".\LastUsedPool.cfg"
-            } else {
-                $TargetPool = $Config.LyncSettings.SecondLyncPool
-            }
-        } else {
-            $TargetPool = $Config.LyncSettings.FirstLyncPool
-        }
 
         foreach ($objResult in $UserArray) {
             $objUser = $objResult.Properties
