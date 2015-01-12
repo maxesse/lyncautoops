@@ -205,18 +205,13 @@ function EnableLyncUsers {
         } else {
             # Since the file doesn't exist, we recreate the object using the second pool names, as they'll be flipped over during activation
             $TargetPoolArray = @()
-            $PoolIndex = 0
             ForEach ($LyncPool in $Config.LyncSettings.PoolArray.Pool) {
-                $TargetPoolObj = New-Object System.Object
-                $TargetPoolObj | Add-Member -type NoteProperty -Name PoolID -Value $PoolIndex
                 # If the pool location doesn't have a paired pool, we'll just use the first value
                 If ($LyncPool.SecondPoolFQDN -ne "") {
-                    $TargetPoolObj | Add-Member -type NoteProperty -Name LastUsedPool -Value 1
+                    $TargetPoolArray += 1
                 } else {
-                    $TargetPoolObj | Add-Member -type NoteProperty -Name LastUsedPool -Value 0
+                    $TargetPoolArray += 0
                 }
-                $TargetPoolArray += $TargetPoolObj
-                $PoolIndex++
             }
         }
 
@@ -225,14 +220,17 @@ function EnableLyncUsers {
             [string]$objItem = $Config.ADSettings.NetBiosDomain + "\" + $objUser."samaccountname"
             [string]$objDN = $objuser."distinguishedname"
             $error.clear()
-            # If we're in a paired pool configuration we flip over the target pool
-            if($Config.LyncSettings.Pairedpool -eq "True") {
-                if($TargetPool -eq $Config.LyncSettings.FirstLyncPool) {
-                    $TargetPool = $Config.LyncSettings.SecondLyncPool
+
+            # We work out on which pool to enable the new user
+            if ($Config.LyncSettings.PoolTopology -eq "Simple") {
+                if($TargetPoolArray[0] -eq 0 -and $Config.LyncSettings.PoolArray.Pool[0].SecondPoolFQDN -ne "") {
+                    $TargetPool = $Config.LyncSettings.PoolArray.Pool[0].SecondPoolFQDN
+                    $TargetPoolArray[0] = 1
                 } else {
-                    $TargetPool = $Config.LyncSettings.FirstLyncPool
+                    $TargetPool = $Config.LyncSettings.PoolArray.Pool[0].FirstPoolFQDN
+                    $TargetPoolArray[0] = 0
                 }
-            }
+            }                
             # We finally enable the Lync user here
             Enable-CsUser -Identity $objItem -RegistrarPool $TargetPool -SipAddressType EmailAddress -Confirm:$False
             if($error.count -gt 0) {
