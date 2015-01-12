@@ -239,7 +239,28 @@ function EnableLyncUsers {
                 }
             } elseif ($Config.LyncSettings.PoolTopology -eq "MultiPool") {
                 # Lowercase version of the user location property as it's case sensitive
-                $UserLocation = $Config.ADSettings.UserLocation.ToLower()
+                $UserLocationAttribute = $Config.ADSettings.UserLocation.ToLower()
+                
+                # We check user location against pool location
+                $TargetLocation = $Config.LyncSettings.PoolArray.Pool | Where-Object {$_.Location -eq $ObjUser.$UserLocationAttribute}
+                
+                # If the user has a different location or it's not specified we'll try with the fallback pool
+                If ($ObjUser.$UserLocationAttribute -eq $Null -or $TargetLocation -eq $Null) {
+                    $TargetLocation = $Config.LyncSettings.PoolArray.Pool | Where-Object {$_.IsFallBackPool -eq "True"}
+                    
+                    # If a fallback pool is not configured either, we'll skip the user
+                    If ($TargetLocation -eq $Null) {
+                        logger ( "CANNOT ENABLE LYNC USER - LOCATION NOT SUPPORTED AND FALLBACK POOL DISABLED: " + $objItem + " : " + $error ) cERROR
+                        Continue
+                    }
+                }
+                if($TargetPoolArray[$TargetLocation.PoolID] -eq 0 -and $Config.LyncSettings.PoolArray.Pool[$TargetLocation.PoolID].SecondPoolFQDN -ne "") {
+                    $TargetPool = $TargetLocation.SecondPoolFQDN
+                    $TargetPoolArray[$TargetLocation.PoolID] = 1
+                } else {
+                    $TargetPool = $TargetLocation.FirstPoolFQDN
+                    $TargetPoolArray[$TargetLocation.PoolID] = 0
+                }
                 
             }           
             # We finally enable the Lync user here
@@ -258,7 +279,7 @@ function EnableLyncUsers {
             }
          }
          # We commit to file the last used pool for the next run
-         $TargetPool | Out-file ".\LastUsedPool.cfg"
+         $TargetPoolArray | Export-Clixml ".\LastUsedPools.config"
          Return $UserArray
     }
 }
