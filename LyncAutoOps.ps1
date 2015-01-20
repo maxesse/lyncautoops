@@ -213,13 +213,13 @@ function EnableLyncUsers {
             $TargetPoolArray = Import-Clixml ".\LastUsedPools.config"
         } else {
             # Since the file doesn't exist, we recreate the object using the second pool names, as they'll be flipped over during activation
-            $TargetPoolArray = @()
+            [array]$TargetPoolArray = @()
             ForEach ($LyncPool in $Config.LyncSettings.PoolArray.Pool) {
                 # If the pool location doesn't have a paired pool, we'll just use the first value
                 If ($LyncPool.SecondPoolFQDN -ne "") {
-                    $TargetPoolArray += 1
+                    [array]$TargetPoolArray += 1
                 } else {
-                    $TargetPoolArray += 0
+                    [array]$TargetPoolArray += 0
                 }
             }
         }
@@ -228,16 +228,15 @@ function EnableLyncUsers {
             $objUser = $objResult.Properties
             [string]$objItem = $Config.ADSettings.NetBiosDomain + "\" + $objUser."samaccountname"
             [string]$objDN = $objuser."distinguishedname"
-            $error.clear()
-
+            
             # We work out on which pool to enable the new user
             if ($Config.LyncSettings.PoolTopology -eq "Simple") {
-                if($TargetPoolArray[0] -eq 0 -and $Config.LyncSettings.PoolArray.Pool[0].SecondPoolFQDN -ne "") {
-                    $TargetPool = $Config.LyncSettings.PoolArray.Pool[0].SecondPoolFQDN
-                    $TargetPoolArray[0] = 1
+                if($TargetPoolArray[0] -eq 0 -and $Config.LyncSettings.PoolArray.Pool.SecondPoolFQDN -ne "") {
+                    $TargetPool = $Config.LyncSettings.PoolArray.Pool.SecondPoolFQDN
+                    [array]$TargetPoolArray[0] = 1
                 } else {
-                    $TargetPool = $Config.LyncSettings.PoolArray.Pool[0].FirstPoolFQDN
-                    $TargetPoolArray[0] = 0
+                    $TargetPool = $Config.LyncSettings.PoolArray.Pool.FirstPoolFQDN
+                    [array]$TargetPoolArray[0] = 0
                 }
             } elseif ($Config.LyncSettings.PoolTopology -eq "MultiPool") {
                 # Lowercase version of the user location property as it's case sensitive
@@ -266,7 +265,9 @@ function EnableLyncUsers {
                     $TargetPoolArray[$TargetLocation.PoolID] = 0
                 }
                 
-            }           
+            }
+
+            $error.clear()          
             # We finally enable the Lync user here
             Enable-CsUser -Identity $objItem -RegistrarPool $TargetPool -SipAddressType EmailAddress -Confirm:$False
             if($error.count -gt 0) {
@@ -538,8 +539,10 @@ function EmailNotifier {
 if ($Config.ScriptFunctions.Enablement -eq "True") {
     
     # We add an ID to the pools to simplify match with last used pool during enablement
-    For ($i=0; $i -lt $Config.LyncSettings.PoolArray.Pool.Length; $i++) {
-        $Config.LyncSettings.PoolArray.Pool[$i] | Add-Member -MemberType NoteProperty -Name PoolID -Value $i
+    If ($Config.LyncSettings.PoolArray.Pool.Length -ne $Null) {
+        For ($i=0; $i -le $Config.LyncSettings.PoolArray.Pool.Length; $i++) {
+            $Config.LyncSettings.PoolArray.Pool[$i] | Add-Member -MemberType NoteProperty -Name PoolID -Value $i
+        }
     }
 
     # Here we convert the SAMAccountName of the new lync users AD group into a distinguished name
