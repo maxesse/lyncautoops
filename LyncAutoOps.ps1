@@ -1,6 +1,6 @@
 ################################################################################################################################
 # Name: LyncAutoOps Tool 
-# Version: v1.5.0 (12/1/2015)
+# Version: v1.5.1 (20/1/2015)
 # Created By: Max Sanna
 # Web Site: http://blog.maxsanna.com
 # Contact: max(at)maxsanna.com
@@ -30,6 +30,8 @@
 #       Added comments to the code.
 # 1.5.0 Added multi-pool support for global deployments based on user's location, and fallback mechanism
 #       Various code improvements.
+# 1.5.1 Fixed some bugs when used in simple mode related to array manipulation
+#       Fixed all the LF back to CRLF (blame Github for that...)
 # 		
 ################################################################################################################################
 
